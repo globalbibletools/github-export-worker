@@ -6,6 +6,8 @@ on:
       - "main"
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
   build:
     runs-on: ubuntu-latest
     permissions:

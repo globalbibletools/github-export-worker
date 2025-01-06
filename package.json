@@ -3,6 +3,7 @@
     "type": "module",
     "scripts": {
         "build": "tsc",
+        "lint": "eslint .",
         "check-types": "tsc --noEmit",
         "prepare": "husky || true"
     },
@@ -15,12 +16,16 @@
         "pg-cursor": "2.12.1"
     },
     "devDependencies": {
+        "@eslint/js": "^8.57.1",
         "@types/aws-lambda": "^8.10.145",
         "@types/pg": "8.11.6",
         "@types/pg-cursor": "2.7.2",
+        "eslint": "^8.57.1",
+        "globals": "^15.14.0",
         "husky": "9.1.7",
         "lint-staged": "15.3.0",
-        "typescript": "^5"
+        "typescript": "^5",
+        "typescript-eslint": "^7.2.0"
     }
 }
 

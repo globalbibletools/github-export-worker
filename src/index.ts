@@ -4,7 +4,7 @@ import Cursor from 'pg-cursor'
 import { SendMessageBatchCommand, SQSClient } from '@aws-sdk/client-sqs'
 import { Octokit } from '@octokit/rest'
 
-type ScheduledEvent = EventBridgeEvent<"Scheduled Event", any>
+type ScheduledEvent = EventBridgeEvent<"Scheduled Event", unknown>
 const client = new Octokit({
     auth: process.env.GITHUB_TOKEN
 })
@@ -15,10 +15,12 @@ if (!connectionString) {
 }
 const dbClient = new pg.Client({ connectionString })
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function query<T extends QueryResultRow>(text: string, params: any): Promise<QueryResult<T>> {
   return dbClient.query(text, params)
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function *queryCursor<T extends QueryResultRow>(text: string, params: any, batchSize = 1): AsyncGenerator<T> {
     const cursor = dbClient.query(new Cursor<T>(text, params))
 
