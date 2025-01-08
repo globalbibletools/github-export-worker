@@ -1,6 +1,5 @@
 {
     "name": "github-export-worker",
-    "type": "module",
     "scripts": {
         "build": "tsc",
         "lint": "eslint .",
