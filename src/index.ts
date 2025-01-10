@@ -15,18 +15,16 @@ if (!connectionString) {
 }
 const dbClient = new pg.Client({ connectionString });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function query<T extends QueryResultRow>(
   text: string,
-  params: any,
+  params: any, // eslint-disable-line @typescript-eslint/no-explicit-any
 ): Promise<QueryResult<T>> {
   return dbClient.query(text, params);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function* queryCursor<T extends QueryResultRow>(
   text: string,
-  params: any,
+  params: any, // eslint-disable-line @typescript-eslint/no-explicit-any
   batchSize = 1,
 ): AsyncGenerator<T> {
   const cursor = dbClient.query(new Cursor<T>(text, params));
