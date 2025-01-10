@@ -1,133 +1,138 @@
-import { type SQSEvent, type EventBridgeEvent } from 'aws-lambda'
-import pg, { type QueryResult, type QueryResultRow } from 'pg'
-import Cursor from 'pg-cursor'
-import { SendMessageBatchCommand, SQSClient } from '@aws-sdk/client-sqs'
-import { Octokit } from '@octokit/rest'
+import { type SQSEvent, type EventBridgeEvent } from "aws-lambda";
+import pg, { type QueryResult, type QueryResultRow } from "pg";
+import Cursor from "pg-cursor";
+import { SendMessageBatchCommand, SQSClient } from "@aws-sdk/client-sqs";
+import { Octokit } from "@octokit/rest";
 
-type ScheduledEvent = EventBridgeEvent<"Scheduled Event", unknown>
+type ScheduledEvent = EventBridgeEvent<"Scheduled Event", unknown>;
 const client = new Octokit({
-    auth: process.env.GITHUB_TOKEN
-})
+  auth: process.env.GITHUB_TOKEN,
+});
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
-    throw new Error('DATABASE_URL env var missing');
+  throw new Error("DATABASE_URL env var missing");
 }
-const dbClient = new pg.Client({ connectionString })
+const dbClient = new pg.Client({ connectionString });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function query<T extends QueryResultRow>(text: string, params: any): Promise<QueryResult<T>> {
-  return dbClient.query(text, params)
+export async function query<T extends QueryResultRow>(
+  text: string,
+  params: any,
+): Promise<QueryResult<T>> {
+  return dbClient.query(text, params);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function *queryCursor<T extends QueryResultRow>(text: string, params: any, batchSize = 1): AsyncGenerator<T> {
-    const cursor = dbClient.query(new Cursor<T>(text, params))
+export async function* queryCursor<T extends QueryResultRow>(
+  text: string,
+  params: any,
+  batchSize = 1,
+): AsyncGenerator<T> {
+  const cursor = dbClient.query(new Cursor<T>(text, params));
 
-    let size = 0
-    do {
-        const rows = await cursor.read(batchSize)
-        size = rows.length
+  let size = 0;
+  do {
+    const rows = await cursor.read(batchSize);
+    size = rows.length;
 
-        for (const row of rows) {
-            yield row
-        }
-    } while (size > 0)
+    for (const row of rows) {
+      yield row;
+    }
+  } while (size > 0);
 }
-
 
 export async function handler(event: SQSEvent | ScheduledEvent) {
-    if ('Records' in event) {
-        const message = JSON.parse(event.Records[0].body) as { code: string }
-        await exportLanguage(message.code)
-    } else if ('detail-type' in event) {
-        await queueLanguages()
-    }
+  if ("Records" in event) {
+    const message = JSON.parse(event.Records[0].body) as { code: string };
+    await exportLanguage(message.code);
+  } else if ("detail-type" in event) {
+    await queueLanguages();
+  }
 }
 
 async function queueLanguages() {
-    const languages = await fetchUpdatedLanguages()
-    if (languages.length === 0) {
-        console.log('No languages to export to GitHub')
-        return
-    }
+  const languages = await fetchUpdatedLanguages();
+  if (languages.length === 0) {
+    console.log("No languages to export to GitHub");
+    return;
+  }
 
-    const sqsClient = new SQSClient();
-    await sqsClient.send(
-        new SendMessageBatchCommand({
-            QueueUrl: process.env.GITHUB_EXPORT_QUEUE_URL,
-            Entries: languages.map(language => ({
-                MessageGroupId: 'github-export',
-                Id: language.code,
-                MessageBody: JSON.stringify({
-                    code: language.code
-                }),
-            }))
-        })
-    );
+  const sqsClient = new SQSClient();
+  await sqsClient.send(
+    new SendMessageBatchCommand({
+      QueueUrl: process.env.GITHUB_EXPORT_QUEUE_URL,
+      Entries: languages.map((language) => ({
+        MessageGroupId: "github-export",
+        Id: language.code,
+        MessageBody: JSON.stringify({
+          code: language.code,
+        }),
+      })),
+    }),
+  );
 
-    console.log(`Queued the following languages for export to GitHub:
-${languages.map(language => language.code).join('\n')}`)
+  console.log(`Queued the following languages for export to GitHub:
+${languages.map((language) => language.code).join("\n")}`);
 }
 
-
 async function exportLanguage(code: string) {
-    console.log(`Starting export of language ${code}`)
+  console.log(`Starting export of language ${code}`);
 
-    console.log('Creating blob for each book')
-    const treeItems = []
-    for await (const book of fetchLanguageData(code)) {
-        const treeItem = await createBlobForBook(code, book)
-        treeItems.push(treeItem)
-    }
+  console.log("Creating blob for each book");
+  const treeItems = [];
+  for await (const book of fetchLanguageData(code)) {
+    const treeItem = await createBlobForBook(code, book);
+    treeItems.push(treeItem);
+  }
 
-    console.log('Creating tree')
-    const treeSha = await createTree(treeItems)
+  console.log("Creating tree");
+  const treeSha = await createTree(treeItems);
 
-    console.log('Creating commit')
-    await createCommit(code, treeSha)
+  console.log("Creating commit");
+  await createCommit(code, treeSha);
 
-    console.log('Export complete')
+  console.log("Export complete");
 }
 
 async function fetchUpdatedLanguages() {
-    const result = await query<{ code: string }>(
-        `SELECT DISTINCT lang.code FROM gloss
+  const result = await query<{ code: string }>(
+    `SELECT DISTINCT lang.code FROM gloss
         JOIN phrase ph ON ph.id = gloss.phrase_id
         JOIN language lang ON lang.id = ph.language_id
         WHERE gloss.updated_at >= NOW() - INTERVAL '8 days'
             OR ph.deleted_at >= NOW() - INTERVAL '8 days'
         ORDER BY lang.code
         `,
-        []
-    )
-    return result.rows
+    [],
+  );
+  return result.rows;
 }
 
 interface Word {
-    id: string
-    gloss: string | null
+  id: string;
+  gloss: string | null;
 }
 
 interface Verse {
-    id: string
-    words: Word[]
+  id: string;
+  words: Word[];
 }
 
 interface Chapter {
-    id: string
-    verses: Verse[]
+  id: string;
+  verses: Verse[];
 }
 
 interface Book {
-    id: string
-    name: string
-    chapters: Chapter[]
+  id: string;
+  name: string;
+  chapters: Chapter[];
 }
 
 function fetchLanguageData(languageId: string) {
-    return queryCursor<Book>(
-        `SELECT
+  return queryCursor<Book>(
+    `SELECT
             book.id,
             book.name,
             JSON_AGG(JSON_BUILD_OBJECT(
@@ -170,72 +175,75 @@ function fetchLanguageData(languageId: string) {
         ) book_chapters ON book_chapters.book_id = book.id
         GROUP BY book.id
         `,
-        [languageId]
-    )
+    [languageId],
+  );
 }
 
-const GH_OWNER = 'globalbibletools'
-const GH_REPO = 'data'
-const GH_BRANCH = 'main'
+const GH_OWNER = "globalbibletools";
+const GH_REPO = "data";
+const GH_BRANCH = "main";
 
 interface TreeItem {
-    path?: string;
-    mode?: "100644" | "100755" | "040000" | "160000" | "120000";
-    type?: "blob" | "tree" | "commit";
-    sha?: string | null;
-    content?: string;
+  path?: string;
+  mode?: "100644" | "100755" | "040000" | "160000" | "120000";
+  type?: "blob" | "tree" | "commit";
+  sha?: string | null;
+  content?: string;
 }
 
-async function createBlobForBook(languageCode: string, book: Book): Promise<TreeItem> {
-    const result = await client.git.createBlob({
-        owner: GH_OWNER,
-        repo: GH_REPO,
-        content: JSON.stringify(book, null, 2),
-        encoding: 'utf-8'
-    })
-    return {
-        path: `${languageCode}/${book.id.toString().padStart(2, '0')}-${book.name}.json`,
-        mode: '100644',
-        type: 'blob',
-        sha: result.data.sha
-    }
+async function createBlobForBook(
+  languageCode: string,
+  book: Book,
+): Promise<TreeItem> {
+  const result = await client.git.createBlob({
+    owner: GH_OWNER,
+    repo: GH_REPO,
+    content: JSON.stringify(book, null, 2),
+    encoding: "utf-8",
+  });
+  return {
+    path: `${languageCode}/${book.id.toString().padStart(2, "0")}-${book.name}.json`,
+    mode: "100644",
+    type: "blob",
+    sha: result.data.sha,
+  };
 }
 
 async function createTree(items: TreeItem[]): Promise<string> {
-    const result = await client.git.getTree({
-        owner: GH_OWNER,
-        repo: GH_REPO,
-        tree_sha: GH_BRANCH
-    })
-    
-    const treeResult = await client.git.createTree({
-        owner: GH_OWNER,
-        repo: GH_REPO,
-        base_tree: result.data.sha,
-        tree: items
-    })
-    return treeResult.data.sha
+  const result = await client.git.getTree({
+    owner: GH_OWNER,
+    repo: GH_REPO,
+    tree_sha: GH_BRANCH,
+  });
+
+  const treeResult = await client.git.createTree({
+    owner: GH_OWNER,
+    repo: GH_REPO,
+    base_tree: result.data.sha,
+    tree: items,
+  });
+  return treeResult.data.sha;
 }
 
 async function createCommit(code: string, treeSha: string) {
-    const parentResult = await client.git.getRef({
-        owner: GH_OWNER,
-        repo: GH_REPO,
-        ref: `heads/${GH_BRANCH}`
-    })
+  const parentResult = await client.git.getRef({
+    owner: GH_OWNER,
+    repo: GH_REPO,
+    ref: `heads/${GH_BRANCH}`,
+  });
 
-    const commitResult = await client.git.createCommit({
-        owner: GH_OWNER,
-        repo: GH_REPO,
-        tree: treeSha,
-        message: `Export from Global Bible Tools for ${code}`,
-        parents: [parentResult.data.object.sha]
-    })
+  const commitResult = await client.git.createCommit({
+    owner: GH_OWNER,
+    repo: GH_REPO,
+    tree: treeSha,
+    message: `Export from Global Bible Tools for ${code}`,
+    parents: [parentResult.data.object.sha],
+  });
 
-    await client.git.updateRef({
-        owner: GH_OWNER,
-        repo: GH_REPO,
-        ref: `heads/${GH_BRANCH}`,
-        sha: commitResult.data.sha
-    })
+  await client.git.updateRef({
+    owner: GH_OWNER,
+    repo: GH_REPO,
+    ref: `heads/${GH_BRANCH}`,
+    sha: commitResult.data.sha,
+  });
 }
