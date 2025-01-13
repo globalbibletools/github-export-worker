@@ -2,18 +2,27 @@ import { type SQSEvent, type EventBridgeEvent } from "aws-lambda";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import Cursor from "pg-cursor";
 import { SendMessageBatchCommand, SQSClient } from "@aws-sdk/client-sqs";
-import { Octokit } from "@octokit/rest";
+import type { Octokit } from "@octokit/rest" with { "resolution-mode": "import" };
 
 type ScheduledEvent = EventBridgeEvent<"Scheduled Event", unknown>;
-const client = new Octokit({
-  auth: process.env.GITHUB_TOKEN,
-});
+
+// This mess is required because @octokit/rest is ESM only and AWS Lambda on docker requires CJS.
+let _client: Octokit;
+async function getGithubClient() {
+  if (_client) return _client;
+
+  const { Octokit } = await import("@octokit/rest");
+  _client = new Octokit({
+    auth: process.env.GITHUB_TOKEN,
+  });
+  return _client;
+}
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
   throw new Error("DATABASE_URL env var missing");
 }
-const dbClient = new pg.Client({ connectionString });
+const dbClient = new pg.Pool({ connectionString, max: 1 });
 
 export async function query<T extends QueryResultRow>(
   text: string,
@@ -27,17 +36,22 @@ export async function* queryCursor<T extends QueryResultRow>(
   params: any, // eslint-disable-line @typescript-eslint/no-explicit-any
   batchSize = 1,
 ): AsyncGenerator<T> {
-  const cursor = dbClient.query(new Cursor<T>(text, params));
+  const client = await dbClient.connect();
+  try {
+    const cursor = client.query(new Cursor<T>(text, params));
 
-  let size = 0;
-  do {
-    const rows = await cursor.read(batchSize);
-    size = rows.length;
+    let size = 0;
+    do {
+      const rows = await cursor.read(batchSize);
+      size = rows.length;
 
-    for (const row of rows) {
-      yield row;
-    }
-  } while (size > 0);
+      for (const row of rows) {
+        yield row;
+      }
+    } while (size > 0);
+  } finally {
+    client.release();
+  }
 }
 
 export async function handler(event: SQSEvent | ScheduledEvent) {
@@ -193,6 +207,8 @@ async function createBlobForBook(
   languageCode: string,
   book: Book,
 ): Promise<TreeItem> {
+  const client = await getGithubClient();
+
   const result = await client.git.createBlob({
     owner: GH_OWNER,
     repo: GH_REPO,
@@ -208,6 +224,8 @@ async function createBlobForBook(
 }
 
 async function createTree(items: TreeItem[]): Promise<string> {
+  const client = await getGithubClient();
+
   const result = await client.git.getTree({
     owner: GH_OWNER,
     repo: GH_REPO,
@@ -224,6 +242,8 @@ async function createTree(items: TreeItem[]): Promise<string> {
 }
 
 async function createCommit(code: string, treeSha: string) {
+  const client = await getGithubClient();
+
   const parentResult = await client.git.getRef({
     owner: GH_OWNER,
     repo: GH_REPO,

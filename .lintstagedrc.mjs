@@ -1,4 +1,4 @@
 export default {
-  "**/*": "prettier --write --skip-unknown",
+  "**/*": "prettier --write --ignore-unknown",
   "*.{ts,tsx}": () => ["npm run check-types", "npm run lint"],
 };
