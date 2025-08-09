@@ -71,18 +71,25 @@ async function queueLanguages() {
   }
 
   const sqsClient = new SQSClient();
-  await sqsClient.send(
-    new SendMessageBatchCommand({
-      QueueUrl: process.env.GITHUB_EXPORT_QUEUE_URL,
-      Entries: languages.map((language) => ({
-        MessageGroupId: "github-export",
-        Id: language.code,
-        MessageBody: JSON.stringify({
-          code: language.code,
+  const batches = [];
+  for (let i = 0; i < languages.length; i += 10) {
+    batches.push(
+      sqsClient.send(
+        new SendMessageBatchCommand({
+          QueueUrl: process.env.GITHUB_EXPORT_QUEUE_URL,
+          Entries: languages.slice(i, i + 10).map((language) => ({
+            MessageGroupId: "github-export",
+            Id: language.code,
+            MessageBody: JSON.stringify({
+              code: language.code,
+            }),
+          })),
         }),
-      })),
-    }),
-  );
+      ),
+    );
+  }
+
+  await Promise.allSettled(batches);
 
   console.log(`Queued the following languages for export to GitHub:
 ${languages.map((language) => language.code).join("\n")}`);
